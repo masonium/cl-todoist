@@ -22,11 +22,43 @@
         (response
           (drakma:http-request (format nil "http://todoist.com/~A/~A"
                                        (gethash method +methods-base-map+ "API")
-                                       (gethash method +methods-map+ "method"))
+                                       (gethash method +methods-map+ method))
                                :parameters parameters)))
     (if json-only
         response
-        (decode-json-from-string* response))))
+        (handler-case (decode-json-from-string* response)
+          (t (x) response)))))
+
+(defclass* full-sync ()
+  (user
+   projects
+   label-list
+   incomplete-items)
+  :automatic-initargs
+  :automatic-accessors)
+
+(defmethod initialize-instance :after ((instance full-sync) &key projects)
+  "Create a list "
+  (setf (incomplete-items instance)
+        (make-indexed-hash-table (mappend #'items projects)
+                                 #'id)))
 
 (defun get-all (user)
-  (request "sync-get" `(("token" . ,(api-token user)))) t)
+  "Get the full sync of the entire user's set"
+  (let ((response (request "sync-get" `(("api_token" . ,(api-token user))))))
+    (let* ((projects-data  (assoc-value response 'projects )))
+      (make-instance 'full-sync
+                     :projects (mapcar #'make-project-from-json-data
+                                       projects-data)
+                     :label-list (mapcar #'(lambda (x) (assoc-value x 'name))
+                                         (assoc-value response 'labels))
+                     :user user))))
+
+(defun get-item-ids-by-tag (user tag)
+  "Get all incomplete item ids with a given tag."
+  (let ((response 
+         (request "query" `(("token" . ,(api-token user))
+                            ("queries" . ,(format nil "[\"@~A\"]" tag))))))
+    (mapcar (fn (assoc-value % 'item-id)) (cdaar response))))
+
+(defun get-item-by-id ())
